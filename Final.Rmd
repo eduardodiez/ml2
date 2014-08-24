@@ -1,0 +1,585 @@
+---
+title: "Machine Learning Writeup"
+author: "Eduardo B. Díez --- August 2014"
+date: " "
+output: 
+  Grmd::docx_document:
+    fig_caption: TRUE
+    force_captions: TRUE
+    keep_md: yes
+    self_contained: yes
+---
+
+```{r Defaults, echo=FALSE, error=FALSE, warning=FALSE, message=FALSE}
+
+curpar <- par()                     # to restore at the end
+
+# set the default working directory
+curdir <- getwd()                   # to restore at the end too
+workingdirectory <- "D:/Cursos/Hopkin/8-AR-Practical Machine Learning/MyProject"
+setwd(workingdirectory)
+
+set.seed(1)
+
+library("knitr")
+library("Grmd")
+library("Gmisc")
+
+# for my latex bibliography
+Sys.setenv(TEXINPUTS=getwd(),
+           BIBINPUTS=getwd(),
+           BSTINPUTS=getwd())
+
+# give defaults to chunks (...)
+opts_chunk$set(dpi=300, dev.args=list(type="cairo"),
+               fig.path="img/",
+               fig.height=10, 
+               fig.width=10,
+               out.width='100%\\textwidth',
+               echo=FALSE,
+               error=FALSE, 
+               warning=FALSE, 
+               message=FALSE)
+
+options(digits=2)
+options(xtable.type = 'html')
+options(xtable.html.table.attributes = 
+          list(style=sprintf("style='%s'",
+                             paste("border:0",
+                                   "border-top: 1px solid grey", 
+                                   "border-bottom: 1px solid grey",
+                                   sep="; "))))
+
+```
+
+## Introduction
+
+This document is born with the vocation to be accessible as a web page from this [gh-page](http://eduardodiez.github.io/ml2/index.html) or a copy in [rpubs](http://rpubs.com/turpial/ml) and the source code ---as a Rmd file--- and the compile result ---as a HTML file--- can be found in this [github](https://github.com/eduardodiez/ML) repository. The report try to explain how we chose the forecast for 20 cases about the way in which six participants do exercises according with the _datae_ [from this link](http://groupware.les.inf.puc-rio.br/har#weight_lifting_exercises) to finally submit the forecast as the final part of the project.
+
+We'll talk of the predictors that were selected as "features" to develop the model and about the various training methods we used whose results were compared and provided aid to make the final decision based on the accuracy they showed.
+
+## Bunch of Data and very Few Features
+
+In this project we will use data from four accelerometers on the belt, forearm, arm, and dumbbell of six participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. So, the data contain the raw information from the gyroscopes and also some variables derivates from the raw as mean, standard deviation among other few.
+
+```{r DataCleaning, echo=FALSE, eval=TRUE}
+
+# get the data
+orgtraining <- read.csv("pml-training.csv")
+orgtesting <- read.csv("pml-testing.csv")
+
+# After inspection we think this are features and the rest garbage
+mypredictors <- c("roll_belt","pitch_belt", "yaw_belt","total_accel_belt",  
+                  "roll_arm", "pitch_arm", "yaw_arm", "total_accel_arm",
+                  "roll_dumbbell", "pitch_dumbbell", "yaw_dumbbell", "total_accel_dumbbell", 
+                  "roll_forearm", "pitch_forearm", "yaw_forearm", "total_accel_forearm")
+
+#
+classe <- orgtraining$classe
+orgtraining <- orgtraining[, mypredictors]
+orgtraining$classe <- classe
+orgtraining$total_accel_arm <- as.numeric(orgtraining$total_accel_arm)
+orgtraining$total_accel_belt <- as.numeric(orgtraining$total_accel_belt)
+orgtraining$total_accel_dumbbell <- as.numeric(orgtraining$total_accel_dumbbell)
+orgtraining$total_accel_forearm <- as.numeric(orgtraining$total_accel_forearm)
+
+#
+problem_id <- as.factor(orgtesting$problem_id)
+orgtesting <- orgtesting[, mypredictors]
+orgtesting$problem_id <- problem_id
+orgtesting$total_accel_arm <- as.numeric(orgtesting$total_accel_arm)
+orgtesting$total_accel_belt <- as.numeric(orgtesting$total_accel_belt)
+orgtesting$total_accel_dumbbell <- as.numeric(orgtesting$total_accel_dumbbell)
+orgtesting$total_accel_forearm <- as.numeric(orgtesting$total_accel_forearm)
+
+```
+
+After the inspection and work around with the data we arrive to the conclusion that the variables we can understand as real features with added value to be used to model the problem effectively are those about roll, yaw, pitch and total acceleration that correspond with each of the four locations where the accelerometers are registering the movements.
+
+```{r DataInspection, echo=FALSE}
+
+library("ggplot2")
+library("ggthemes")
+library("reshape2")
+
+
+roll <- subset(orgtraining, select=c("roll_arm", 
+                                     "roll_belt", 
+                                     "roll_dumbbell", 
+                                     "roll_forearm",
+                                     "classe" ))
+
+names(roll) <- c("arm",
+                 "belt",
+                 "dumbbell",
+                 "forearm",
+                 "classe")
+
+roll <- melt(roll, 
+             id="classe", 
+             variable_name="Movement")
+
+names(roll) <- c("Classe", 
+                 "Movement", 
+                 "Roll")
+
+rollplot <- qplot(Movement, Roll, data=roll, fill=Classe, geom=c("boxplot")) + 
+  scale_shape_cleveland() + 
+  theme_tufte() + 
+  theme_tufte(ticks = FALSE) + 
+  theme(legend.position="none") +
+  xlab("") +  theme(axis.ticks = element_blank(), axis.text.x = element_blank()) +
+  ylim(-200, 200) +
+  ggtitle(paste("Snapshot of Features","\n", "Roll, Pitch, Yaw and total Acceleration for all the gyroscopes' locations and by exercise's clase"))
+
+
+pitch <- subset(orgtraining, 
+                select=c("pitch_arm",
+                         "pitch_belt",
+                         "pitch_dumbbell",
+                         "pitch_forearm",
+                         "classe"))
+names(pitch) <- c("arm",
+                  "belt",
+                  "dumbbell",
+                  "forearm",
+                  "classe")
+
+pitch <- melt(pitch, 
+              id=c("classe"), 
+              variable_name="Movement")
+
+names(pitch) <- c("Classe", 
+                  "Movement", 
+                  "Pitch")
+
+pitchplot <- qplot(Movement, Pitch, data=pitch, fill=Classe, geom=c("boxplot")) + 
+  scale_shape_cleveland() + 
+  theme_tufte() + 
+  theme_tufte(ticks = FALSE) + 
+  theme(legend.position="none") +
+  xlab("") +  theme(axis.ticks = element_blank(), axis.text.x = element_blank()) +
+  ylim(-200, 200)
+
+
+yaw <- subset(orgtraining, select=c( "yaw_arm",
+                                     "yaw_belt",
+                                     "yaw_dumbbell",
+                                     "yaw_forearm",
+                                     "classe"))
+
+names(yaw) <- c("arm",
+                "belt",
+                "dumbbell",
+                "forearm",
+                "classe")
+
+yaw <- melt(yaw, 
+            id="classe", 
+            variable_name="Movement")
+
+names(yaw) <- c("Classe", 
+                "Movement", 
+                "Yaw")
+
+yawplot <- qplot(Movement, Yaw, data=yaw, fill=Classe, geom=c("boxplot")) + 
+  scale_shape_cleveland() + 
+  theme_tufte() + 
+  theme_tufte(ticks = FALSE) +
+  theme(legend.position="none") +
+  xlab("") +
+  theme(axis.ticks = element_blank(), axis.text.x = element_blank()) +
+  ylim(-200, 200)
+
+
+accel <- subset(orgtraining, select=c("total_accel_arm",
+                                      "total_accel_belt",
+                                      "total_accel_dumbbell",
+                                      "total_accel_forearm",
+                                      "classe"))
+
+names(accel) <- c("arm",
+                  "belt",
+                  "dumbbell",
+                  "forearm",
+                  "classe")
+
+accel <- melt(accel, 
+              id="classe", 
+              variable_name="Movement")
+
+names(accel) <- c("Classe", 
+                  "Movement", 
+                  "Accel")
+
+accelplot <- qplot(Movement, Accel, data=accel, fill=Classe, geom=c("boxplot")) + 
+  scale_shape_cleveland() + 
+  theme_tufte() + 
+  theme_tufte(ticks = FALSE) + 
+  theme(legend.position="bottom") +
+  xlab("")  +
+  ylim(0, 80)
+
+```
+
+
+```{r DataPlot, fig.cap="Figure 1. Initial set of features selected; Roll, Pitch, Yaw and total acceleration by the localization of each accelerometer. Also, each class of exercise is associated by a color.", fig.subcap="uno"}
+
+library("grid")
+library("gridExtra")
+
+grid.arrange(rollplot, pitchplot, yawplot, accelplot, ncol=1)
+
+```
+
+After removal the other variables, we proceeded to the proper ordering of the remaining to present them graphically, so one can easily detect any anomaly that may exist and whereafter was computed the correlation between them. The variable **roll_bell** was found correlated with other two of them thus, we decided to eliminate it from the data set.
+
+Below we show the 15 variables with which we make our model.
+
+```{r TheFeatures, results='asis'}
+
+library("Gmisc")
+
+myFeatures <- read.table(header=T, 
+                         text='Feature
+                         1  pitch_belt
+                         2  yaw_belt
+                         3	total_accel_belt
+                         
+                         4	roll_arm
+                         5	pitch_arm
+                         6	yaw_arm
+                         7	total_accel_arm
+                         
+                         8	roll_dumbbell
+                         9	pitch_dumbbell
+                         10	yaw_dumbbell
+                         11	total_accel_dumbbell
+                         
+                         12	roll_forearm
+                         13	pitch_forearm
+                         14	yaw_forearm
+                         15	total_accel_forearm
+                         ')
+
+mytfoot0=paste('<span style="font-size: .8333em;">',
+               'Summary of predictors to use.',
+               '</span>', 
+               sep="")
+
+
+htmlTable(myFeatures, align="cc",
+          rowlabel="#",
+          ctable=TRUE,
+          tfoot=mytfoot0,
+          caption=""
+          )
+
+```
+
+
+```{r roll_belt_out}
+
+training$roll_belt <- NULL
+testing$roll_belt <- NULL
+
+```
+
+## Machineries
+
+Before proceeding is important to note the following to the reader:
+In the source document `final.Rmd` the chunk corresponding to this point has the option `eval = false` to avoid running this code which is very intensive in CPU load and run time. Additionally, this chunk with name  "Machineries" has several other models that have not been included in the writing of this paper ---plots and tables--- for lack of space, but is operational and again time consuming.
+
+Once the data was prepared, the data set was partitioned  60-40 between training and testing. All methods have similar schemes of cross-validation control with the default values, except for the two random forest, RF1 and RF2, which employ their own bootstrap characteristics in order to evaluate the OOB. Also, one boosting method was include, the GBM. In the source code can be found  lots of additional calculations to check the results, prior to show and resume them.
+
+```{r Machineries, echo=FALSE, eval=FALSE}
+
+# with caret
+library("caret")
+set.seed(1)
+
+# let's give a little help (...)
+library("doParallel")
+registerDoParallel(cores=detectCores())
+
+##
+timeGBM <- system.time(modelFitGBM <- train(classe ~ ., data = training, method = "gbm", trControl = trainControl(method = "cv", allowParallel=TRUE)))
+#
+timeLDA <- system.time(modelFitLDA <- train(classe ~ ., data = training, method = "lda", trControl = trainControl(method = "cv", allowParallel=TRUE)))
+#
+timeRBF <- system.time(modelFitRBF <- train(classe ~ ., data = training, method = "rbf", trControl = trainControl(method = "cv", allowParallel=TRUE)))
+#
+timeRPART <- system.time(modelFitRPART <- train(classe ~ ., data = training, method = "rpart", trControl = trainControl(method = "cv", allowParallel=TRUE)))
+#
+timeKNN <- system.time(modelFitKNN <- train(classe ~ ., data = training, method = "knn", trControl = trainControl(method = "cv", allowParallel=TRUE)))
+#
+timeSVM <- system.time(modelFitSVM <- train(classe ~ ., data = training, method = "svmRadial", trControl = trainControl(method = "cv", allowParallel=TRUE)))
+#
+timeRF1 <- system.time(modelFitRF1 <- train(classe ~ ., data = training, method = "rf"))
+#
+library("randomForest")
+timeRF2 <- system.time(modelFitRF2 <- randomForest(classe ~ ., data = training))
+##
+pred <- testing$classe
+predLDA <- predict(modelFitLDA, testing)
+predRBF <- predict(modelFitRBF, testing)
+predRPART <- predict(modelFitRPART, testing)
+predKNN <- predict(modelFitKNN, testing)
+predSVM <- predict(modelFitSVM, testing)
+predRF1 <- predict(modelFitRF1, testing, na.action = na.pass)
+predRF2 <- predict(modelFitRF2, testing, na.action = na.pass)
+predGBM <- predict(modelFitGBM, testing, na.action = na.pass)
+#
+accuLDA <- sum(pred == predLDA)/length(pred)
+accuRBF <- sum(pred == predRBF)/length(pred)
+accuRPART <- sum(pred == predRPART)/length(pred)
+accuKNN <- sum(pred == predKNN)/length(pred)
+accuSVM <- sum(pred == predSVM)/length(pred)
+accuRF1 <- sum(pred == predRF1)/length(pred)
+accuRF2 <- sum(pred == predRF2)/length(pred)
+accuGBM <- sum(pred == predGBM)/length(pred)
+#
+#accuLDA; accuRBF; accuRPART; accuKNN; accuSVM; accuRF1; accuRF2; accuGBM
+#
+ConfussionLDA <- confusionMatrix(testing$classe, predLDA)
+ConfussionRBF <- confusionMatrix(testing$classe, predRBF)
+ConfussionRPART <- confusionMatrix(testing$classe, predRPART)
+ConfussionKNN <- confusionMatrix(testing$classe, predKNN)
+ConfussionSVM <- confusionMatrix(testing$classe, predSVM)
+ConfussionRF1 <- confusionMatrix(testing$classe, predRF1)
+ConfussionRF2 <- confusionMatrix(testing$classe, predRF2)
+ConfussionGBM <- confusionMatrix(testing$classe, predGBM)
+#
+# WITH RESPECT THE SUBMISSION PROJECT ORGTESTING to get the answers
+#
+predictionsLDA <- predict(modelFitLDA, orgtesting)
+predictionsRBF <- predict(modelFitRBF, orgtesting)
+predictionsRPART <- predict(modelFitRPART, orgtesting)
+predictionsKNN <- predict(modelFitKNN, orgtesting)
+predictionsSVM <- predict(modelFitSVM, orgtesting)
+predictionsRF1 <- predict(modelFitRF1, orgtesting)
+predictionsRF2 <- predict(modelFitRF2, orgtesting)
+predictionsGBM <- predict(modelFitGBM, orgtesting)
+#
+```
+
+Follow a panel figure of ROC plots that provide tools to select possibly optimal models and to discard sub-optimal ones independently from the class. In this panel, we can observe the good response of the KNN method ---k-nearest neighbor algorithm--- beside the two random forest ones. Every plot shows, additionally, the process time inverted for each particular algorithm and the whole figure give us an idea of the extensive variety or results.
+
+```{r ROCplot, fig.cap="Figure 2. The ROC curves for the models with the total AUC (Area Under the Curve) with 95% confidence interval and the total process time running in Mobile Intel Core 2 T6400 at 2GHz with 4GB", fig.scap="dos", fig.height=5, fig.width=8}
+
+#let's plot the roc curves of the models
+# define a palette gently with colorblind people
+Gray = "#999999"
+Orange = "#E69F00"
+SkyBlue = "#56B4E9"
+BluishGreen = "#009E73"
+Yellow = "#F0E442"
+Blue = "#0072B2"
+Vermillon = "#D55E00"
+RedddishPurple = "#CC79A7"
+GrayGGplot ="#E5E5E5"
+SalmonWSJ = "#F8F2E4"
+
+library("pROC")
+
+par(mfrow=c(2,3))
+
+rocLDA <- roc(testing$classe,  plot=TRUE, main="LDA Model ROC curve", col=Blue, 
+              ci=TRUE, boot.n=100, ci.alpha=0.95, print.auc=TRUE, algorithm = 2,
+              predict(modelFitLDA, testing, type = "prob")[,1])
+text(0.5, 0.4, adj = c(0,0), paste("process time:",round(timeLDA[3],1),"(s)", sep=" "), cex=0.6666)
+
+rocRPART <- roc(testing$classe,  plot=TRUE, main="RPART Model ROC curve", col=Blue,
+                ci=TRUE, boot.n=100, ci.alpha=0.95, print.auc=TRUE, algorithm = 2,
+                predict(modelFitRPART, testing, type = "prob")[,1])
+text(0.5, 0.4, adj = c(0,0), paste("process time:",round(timeRPART[3],1),"(s)", sep=" "), cex=0.6666)
+
+rocGBM <- roc(testing$classe,  plot=TRUE, main="GBM Model ROC curve", col=Blue,
+              ci=TRUE, boot.n=100, ci.alpha=0.95, print.auc=TRUE, algorithm = 2,
+              predict(modelFitGBM, testing, type = "prob")[,1])
+text(0.5, 0.4, adj = c(0,0), paste("process time:",round(timeGBM[3],1),"(s)", sep=" "), cex=0.6666)
+
+rocKNN <- roc(testing$classe,  plot=TRUE, main="KNN Model ROC curve", col=Blue,
+              ci=TRUE, boot.n=100, ci.alpha=0.95, print.auc=TRUE,algorithm = 2,
+              predict(modelFitKNN, testing, type = "prob")[,1])
+text(0.5, 0.4, adj = c(0,0), paste("process time:",round(timeKNN[3],1),"(s)", sep=" "), cex=0.6666)
+
+#rocSVM <- roc(testing$classe,  plot=TRUE, main="SVM Model ROC curve", 
+#ci=TRUE, boot.n=100, ci.alpha=0.9, print.auc=TRUE,algorithm = 2, 
+#predict(modelFitSVM, testing)$Impaired)
+
+rocRF1 <- roc(testing$classe,  plot=TRUE, main="RF1 Model ROC curve", col=Blue,
+              ci=TRUE, boot.n=100, ci.alpha=0.95, print.auc=TRUE, algorithm = 2, 
+              predict(modelFitRF1, testing, type = "prob")[,1])
+text(0.5, 0.4, adj = c(0,0), paste("process time:",round(timeRF1[3],1),"(s)", sep=" "), cex=0.6666)
+
+rocRF2 <- roc(testing$classe,  plot=TRUE, main="RF2 Model ROC curve", col=Blue,
+              ci=TRUE, boot.n=100, ci.alpha=0.95, print.auc=TRUE, algorithm = 2, 
+              predict(modelFitRF2, testing, type = "prob")[,1])
+text(0.5, 0.4, adj = c(0,0), paste("process time:",round(timeRF2[3],1),"(s)", sep=" "), cex=0.6666)
+
+dev.off() -> trashcan
+##
+
+```
+
+## Results
+
+We're going to use the results of _confusionMatrix(...)$**byClass**_ to construct tables from each method that we used, in order to analyze the statistical composing each matrix. For convenience in this report we show only two of them. The first corresponds to the result  RF2  by using the the _randomForest()_ function ---with the best fit we got.
+
+```{r Table1, results='asis', eval=TRUE}
+
+library("caret")
+
+ConfussionLDA <- confusionMatrix(testing$classe, predLDA)
+ConfussionRBF <- confusionMatrix(testing$classe, predRBF)
+ConfussionRPART <- confusionMatrix(testing$classe, predRPART)
+ConfussionKNN <- confusionMatrix(testing$classe, predKNN)
+ConfussionSVM <- confusionMatrix(testing$classe, predSVM)
+ConfussionRF1 <- confusionMatrix(testing$classe, predRF1)
+ConfussionRF2 <- confusionMatrix(testing$classe, predRF2)
+ConfussionGBM <- confusionMatrix(testing$classe, predGBM)
+
+library("Gmisc")
+
+table1 <- format(t(ConfussionRF2$byClass), digits=2)
+
+mytfoot1=paste('<span style="font-size: .8333em;">',
+               '<sup>&dagger;</sup> The predictions of this model achieved a score of 20 / 20 in the submission part of the project,',
+               "<br />\n" ,
+               'same as RF1 and KNN models.', 
+               '</span>', 
+               sep="")
+
+htmlTable(table1,  align="lccccc",
+          rowlabel="randomForest()",
+          ctable=TRUE,
+          tfoot=mytfoot1,
+          caption="Table 1. Confussion Matrix Statistics of Dual RF2<sup>&dagger;</sup> model"
+          )
+          
+
+
+```
+
+The second one correspond with the boosting GBM method by using the  function _train(..., method = "gbm")_
+
+```{r Table2, results='asis', eval=TRUE}
+table2 <- format(t(ConfussionGBM$byClass), digits=2)
+
+mytfoot2=paste('<span style="font-size: .8333em;">',
+               '<sup>&dagger;</sup> The predictions of this model  achieved a score of 19 / 20 in the submission part of the project.',
+               '</span>', 
+               sep="")
+
+htmlTable(table2,  align="lccccc",
+          rowlabel="method='gbm'",
+          ctable=TRUE,
+          tfoot=mytfoot2, 
+          caption="Table 2. Confussion Matrix Statistics of Boosting GBM<sup>&dagger;</sup> model"
+          )
+
+```
+
+## Final Submission
+
+
+Now, we are going to use the results of the confusion matrix by _confusionMatrix(...)$**overall**_ to construct a resume table with the values of _kappa_ and accuracy ---with its correspondent 95% ci--- for each algorithm we've shown in this report in order to have the completed  panorama of our finds. 
+
+```{r Accuracies, eval=TRUE}
+
+LDA <- c(ConfussionLDA$overall[2],
+         ConfussionLDA$overall[1],
+         ConfussionLDA$overall[3],
+         ConfussionLDA$overall[4])
+
+RPART <- c(ConfussionRPART$overall[2],
+           ConfussionRPART$overall[1],
+           ConfussionRPART$overall[3],
+           ConfussionRPART$overall[4])
+
+GBM <- c(ConfussionGBM$overall[2],
+         ConfussionGBM$overall[1],
+         ConfussionGBM$overall[3],
+         ConfussionGBM$overall[4])
+
+KNN <- c(ConfussionKNN$overall[2],
+         ConfussionKNN$overall[1],
+         ConfussionKNN$overall[3],
+         ConfussionKNN$overall[4])
+
+RF1 <- c(ConfussionRF1$overall[2],
+         ConfussionRF1$overall[1],
+         ConfussionRF1$overall[3],
+         ConfussionRF1$overall[4])
+
+RF2 <- c(ConfussionRF2$overall[2],
+         ConfussionRF2$overall[1],
+         ConfussionRF2$overall[3],
+         ConfussionRF2$overall[4])
+
+accuracyTable <- format(rbind(LDA, RPART, KNN, GBM, RF1, RF2), digits=4)
+colnames(accuracyTable) <- c("Kappa", 
+                             "Accuracy", 
+                             "L: 2.5%",
+                             "U: 97.5%")
+
+
+```
+
+```{r Table3, results='asis', eval=TRUE}
+
+Score <- c("11/20","4/20<sup>&dagger;</sup>","20/20<sup>&Dagger;</sup>","19/20<sup>&dagger;</sup>","20/20<sup>&Dagger;</sup>","20/20<sup>&Dagger;</sup>")
+accuracyTable <- cbind(accuracyTable, Score)
+  
+cgroup <- c("", "Accuracy CI", "Submission")
+n.cgroup <- c(2, 2, 1)
+colnames(accuracyTable) <- gsub("[ ]*death", "", colnames(accuracyTable))
+
+mytfoot3=paste('<span style="font-size: .8333em;">',"<sup>&dagger;</sup> RPART and GBM methods show that a model which fits the data well does not necessarily forecast well. We should expect RPART doing it better than LDA and GBM than KNN but, it is not the case." ,
+               "<br />\n" ,
+               "<sup>&Dagger;</sup> KNN, RF1 and RF2 agree with the same 20 responses to be submited.", 
+               '</span>', 
+               sep="")
+
+htmlTable(accuracyTable,  align="lccccc",
+          rgroupCSSseparator="", 
+          cgroup = cgroup,
+          n.cgroup = n.cgroup,
+          rowlabel="method",
+          ctable=TRUE,
+          tfoot=mytfoot3,
+          caption="Table 3. Summary of <i>Kappas</i> & Accuracies"
+          )
+
+
+```
+
+We observe easily, by inspecting Table 3, that the two best accuracy results, both about 98%, agree in the 20 answers ---prior to make the submission---  and there is a third algorithm that also matches these responses. So, with a 98% accuracy and commonality between three different algorithms, all with high accuracy, cause us to be confident that these are the answers ---the predictions of those three methods--- we will submit.
+
+And so we did and got a correct result in all 20 answers.
+
+Additionally, the table has added the submission results virtually achieved for each method, once we submitted the answers and got a score of 20 / 20 in the first try we did.
+
+## About this Document
+
+```{r Info, echo=FALSE, results='hide'}
+info <- sessionInfo()
+
+AreLoaded=as.character()
+for(i in 1:length(info$loadedOnly)){
+  AreLoaded[i] <- info$loadedOnly[[i]]$Package
+}
+```
+
+All analyses were performed using _`r  R.version.string`_ and _RStudio_ as IDE, with the default  base packages _`r info$base`_, additionally _`r AreLoaded`_ and to produce this report in HTML the packages _Grmd_ and _knitr_. 
+
+```{r TheEnd, results='hide', warning=FALSE}
+
+# restore the enviroment like it was (...)
+par(curpar)
+setwd(curdir)
+
+# The End
+```
+
