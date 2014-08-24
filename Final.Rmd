@@ -1,6 +1,6 @@
 ---
 title: "Machine Learning Writeup"
-author: "Eduardo B. Díez --- August 2014"
+author: "Eduardo B. DÃ­ez --- August 2014"
 date: " "
 output: 
   Grmd::docx_document:
@@ -54,7 +54,7 @@ options(xtable.html.table.attributes =
 
 ## Introduction
 
-This document is born with the vocation to be accessible as a web page from this [gh-page](http://eduardodiez.github.io/ml2/index.html) or a copy in [rpubs](http://rpubs.com/turpial/ml) and the source code ---as a Rmd file--- and the compile result ---as a HTML file--- can be found in this [github](https://github.com/eduardodiez/ML) repository. The report try to explain how we chose the forecast for 20 cases about the way in which six participants do exercises according with the _datae_ [from this link](http://groupware.les.inf.puc-rio.br/har#weight_lifting_exercises) to finally submit the forecast as the final part of the project.
+This document is born with the vocation to be accessible as a web page from this [gh-page](http://eduardodiez.github.io/ml2/index.html) or a copy in [rpubs](http://rpubs.com/turpial/ml) and the source code ---as a Rmd file--- and the compile result ---as a HTML file--- can be found in this [github](https://github.com/eduardodiez/ml2) repository. The report try to explain how we chose the forecast for 20 cases about the way in which six participants do exercises according with the _datae_ [from this link](http://groupware.les.inf.puc-rio.br/har#weight_lifting_exercises) to finally submit the forecast as the final part of the project.
 
 We'll talk of the predictors that were selected as "features" to develop the model and about the various training methods we used whose results were compared and provided aid to make the final decision based on the accuracy they showed.
 
